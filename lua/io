@@ -1,0 +1,32 @@
+#pragma once
+
+extern "C" {
+    typedef int size_t;
+    void putchar(char);
+}
+
+namespace lua {
+    void print(const char *);
+    void print(int);
+
+    template <typename T>
+    void println(T v) {
+        print(v);
+        putchar('\n');
+    }
+
+    void print(const char *s) {
+        int x = 0;
+        while (s[x]) {
+            putchar(s[x]);
+            x ++;
+        }
+    }
+
+    void print(int x) {
+        if (x > 9) {
+            print(x / 10);
+        }
+        putchar('0' + (x % 10));
+    }
+}
