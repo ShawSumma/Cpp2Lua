@@ -1,9 +1,15 @@
 #pragma once
 
+#ifdef LUA_CPP_COMPILER
 extern "C" {
     typedef int size_t;
     void putchar(char);
 }
+#else
+extern "C" {
+    #include <stdio.h>
+}
+#endif
 
 namespace lua {
     void print(const char *);
@@ -24,6 +30,10 @@ namespace lua {
     }
 
     void print(int x) {
+        if (x < 0) {
+            putchar('-');
+            x *= -1;
+        }
         if (x > 9) {
             print(x / 10);
         }
