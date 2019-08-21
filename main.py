@@ -1,4 +1,5 @@
 import json
+import struct
 
 def set_global(self, js):
     imm = js['immediates']
@@ -11,12 +12,12 @@ def get_global(self, js):
 
 def set_local(self, js):
     imm = js['immediates']
-    self.append(f'local l{imm} = stack[#stack]')
+    self.append(f'l{imm} = stack[#stack]')
     self.append(f'stack[#stack] = nil')
 
 def tee_local(self, js):
     imm = js['immediates']
-    self.append(f'local l{imm} = stack[#stack]')
+    self.append(f'l{imm} = stack[#stack]')
 
 def get_local(self, js):
     imm = js['immediates']
@@ -25,19 +26,18 @@ def get_local(self, js):
 def block(self, js):
     self.blockc += 1
     bc = self.blockc
-    self.append(f'do')
-    self.enter()
-    self.ends.append(f'end ::b{bc}::')
+    self.ends.append(f'::b{bc}::')
 
 def loop(self, js):
     self.blockc += 1
     bc = self.blockc
-    self.append(f'do ::b{bc}::')
-    self.enter()
-    self.ends.append(f'goto b{bc} end')
+    self.append(f'::b{bc}::')
+    self.ends.append(None)
 
 def const(self, js):
     imm = js['immediates']
+    if isinstance(imm, list):
+        [imm] = struct.unpack('f' if len(imm) == 4 else 'd', bytes(imm))
     self.append(f'stack[#stack+1] = {imm}')
 
 def drop(self, js):
@@ -47,8 +47,16 @@ def opand(self, js):
     self.append(f'stack[#stack-1] = _num(_bool(stack[#stack-1]) and _bool(stack[#stack]))')
     self.append(f'stack[#stack] = nil')
 
+def opor(self, js):
+    self.append(f'stack[#stack-1] = _num(_bool(stack[#stack-1]) or _bool(stack[#stack]))')
+    self.append(f'stack[#stack] = nil')
+
 def ne(self, js):
     self.append(f'stack[#stack-1] = _num(stack[#stack-1] ~= stack[#stack])')
+    self.append(f'stack[#stack] = nil')
+
+def eq(self, js):
+    self.append(f'stack[#stack-1] = _num(stack[#stack-1] == stack[#stack])')
     self.append(f'stack[#stack] = nil')
 
 def gt_s(self, js):
@@ -72,9 +80,13 @@ def eqz(self, js):
 
 def br_if(self, js):
     imm = self.blockc - int(js['immediates'])
+    self.append('do')
+    self.enter()
     self.append('local case = stack[#stack]')
     self.append('stack[#stack] = nil')
     self.append(f'if _bool(case) then goto b{imm} end')
+    self.exit()
+    self.append('end')
     # self.append(f'if _bool(stack[#stack]) then goto b{imm} end')
 
 def br(self, js):
@@ -96,6 +108,9 @@ def add(self, js):
 def sub(self, js):
     self.append(f'stack[#stack-1] = stack[#stack-1] - stack[#stack]')
     self.append(f'stack[#stack] = nil')
+
+def opabs(self, js):
+    self.append(f'if stack[#stack] < 0 then stack[#stack] = -stack[#stack] end')
 
 def div_s(self, js):
     # self.append(f'stack[#stack-1] = math.floor(stack[#stack-1] / stack[#stack])')
@@ -179,9 +194,16 @@ def ret(self, js):
 
 def end(self, js):
     val = self.ends.pop()
-    if len(val.strip()) != 0:
-        self.exit()
+    if val is not None and len(val.strip()) != 0:
         self.append(val)
+
+def select(self, js):
+    self.append('if stack[#stack-2] == 0 then stack[#stack-2] = stack[#stack] else stack[#stack-2] = stack[#stack-1] end')
+    self.append('stack[#stack] = nil')
+    self.append('stack[#stack] = nil')
+
+def passop(self, js):
+    pass
 
 class Compiler:
     def __init__(self, fn):
@@ -222,17 +244,36 @@ class Compiler:
             'block': block,
             'loop': loop,
             'ne': ne,
+            'eq': eq,
+            'gt': gt_s,
+            'ge': ge_s,
+            'lt': lt_s,
+            'le': le_s,
             'gt_s': gt_s,
             'ge_s': ge_s,
             'lt_s': lt_s,
             'le_s': le_s,
+            'gt_u': gt_s,
+            'ge_u': ge_s,
+            'lt_u': lt_s,
+            'le_u': le_s,
             'eqz': eqz,
             'and': opand,
+            'or': opor,
             'br_if': br_if,
             'br': br,
             'shl': shl,
             'shr_s': shr,
-            'end': end
+            'shr_u': shr,
+            'end': end,
+            'select': select,
+            'abs': opabs,
+            'trunc/f32': passop,
+            'trunc_s/f32': passop,
+            'extend_s/i32': passop,
+            'extend_u/i32': passop,
+            'wrap/i64': passop,
+            'unreachable': passop,
         }
     def append(self, s):
         self.code.append('  '*self.depth + s)
@@ -244,7 +285,7 @@ class Compiler:
         self.walk(self.json)
         fc = self.fnc - 1
         # self.append('g0 = #mem+1')
-        self.append(f'g0 = 0')
+        self.append(f'g0 = stackend')
         self.append('f%s({0, 0})' % (str(self.fnc-1), ))
     def walk_import(self, *ent):
         for i in ent:
@@ -293,11 +334,24 @@ class Compiler:
     def walk_fn_body(self, locs, code):
         self.ends = ['']
         self.blockc = 0
+        self.localc = 0
         self.append(f'function f{self.fnc}(stack)')
         self.enter()
-        for i in range(self.types[self.typemap[self.typec]])[::-1]:
+        nargc = self.types[self.typemap[self.typec]]
+        for i in range(nargc)[::-1]:
             self.append(f'local l{i} = stack[#stack]')
             self.append('stack[#stack] = nil')
+        localc = 0
+        for i in locs:
+            localc += i['count']
+        if localc > 0:
+            s = []
+            for i in range(localc):
+                n = nargc + i
+                s.append('l' + str(n))
+            ss = ', '.join(s)
+            self.append(f'local {ss}')
+        # for i in range()
         # self.append('local storage, smem = {}, {}')
         pl = 0
         for i in locs:

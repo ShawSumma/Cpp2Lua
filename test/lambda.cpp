@@ -13,7 +13,7 @@ T fib(T n) {
 template <typename T>
 auto math(T a) {
     return [=](T b) {
-        return [&](T c) {
+        return [=](T c) {
             return [=](T d) -> T {
                 return a * b + c * d;
             };

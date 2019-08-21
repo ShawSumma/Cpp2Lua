@@ -1,0 +1,73 @@
+#include <lua/types>
+
+namespace lua {
+    template<typename T>
+    class auto_ptr {
+        T *_v;
+        size_t _refc = 0;
+    public:
+        auto_ptr(const T&);
+        auto_ptr(auto_ptr<T>&);
+        auto_ptr(T* = nullptr);
+        // auto_ptr();
+        ~auto_ptr();
+        T *get();
+        void ref();
+        size_t refc() const;
+        T& operator*();
+    };
+
+    template<typename T>
+    auto_ptr<T>::auto_ptr(const T& v) {
+        _v = new T(v);
+        _refc = 1;
+    }
+
+    template<typename T>
+    auto_ptr<T>::auto_ptr(T* v) {
+        _v = v;
+        if (v) {
+            _refc = 1;
+        }
+    }
+
+    template<typename T>
+    auto_ptr<T>::auto_ptr(auto_ptr<T>& v) {
+        _v = v.get();
+        _refc = v.refc();
+        ref();
+    }
+
+    template<typename T>
+    T* auto_ptr<T>::get() {
+        return _v;
+    }
+
+    // template<typename T>
+    // auto_ptr<T>::auto_ptr() {
+    //     _refc ++;
+    // }
+
+    template<typename T>
+    auto_ptr<T>::~auto_ptr() {
+        _refc --;
+        if (_refc == 0) {
+            delete _v;
+        }
+    }
+
+    template<typename T>
+    size_t auto_ptr<T>::refc() const {
+        return _refc;
+    }
+
+    template<typename T>
+    void auto_ptr<T>::ref() {
+        _refc ++;
+    }
+
+    template<typename T>
+    T& auto_ptr<T>::operator*() {
+        return *_v;
+    }
+}

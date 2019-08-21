@@ -1,5 +1,7 @@
 #include <lua/io>
 
+using namespace lua;
+
 namespace bench {
     int fib(int x) {
         if (x < 2) {
@@ -10,6 +12,5 @@ namespace bench {
 }
 
 int main(void) {
-    using namespace lua;
     println(bench::fib(33));
 }
