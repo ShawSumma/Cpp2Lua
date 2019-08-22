@@ -1,35 +1,52 @@
 #pragma once
 #include <lua/types>
 #include <lua/interp>
+#include <lua/numeric>
+#include <lua/memory>
 
-extern "C" {
-    void *malloc(size_t);
-    void free(void *);
-}
+namespace std {
+    template<typename>
+    class vector;
 
-namespace lua {
     template<typename T>
     class vector {
         T* _mem;
         size_t _size = 0;
         size_t _capacity = 0;
     public:
-        using value_type = T;
+        typedef T value_type;
+
         vector();
+        vector(size_t);
+        vector(size_t, size_t);
+        vector(const vector<T> &);
         ~vector();
-        void push_back(const T);
+        void push_back(const T&);
         void resize();
         void pop_back();
+        T *begin();
+        T *end();
         size_t size();
-        T& operator[](size_t);
+        T &operator[](size_t);
     };
 
     template<typename T>
-    void vector<T>::push_back(const T v) {
-        _size ++;
+    void vector<T>::push_back(const T &v) {
         resize();
+        _size ++;
         _mem[size()-1] = v;
     }
+
+    template<typename T>
+    T *vector<T>::begin() {
+        return _mem;
+    }
+
+    template<typename T>
+    T *vector<T>::end() {
+        return _mem+_size;
+    }
+
     template<typename T>
     void vector<T>::resize() {
         if (_size + 4 >= _capacity) {
@@ -49,7 +66,7 @@ namespace lua {
     }
 
     template<typename T>
-    T& vector<T>::operator [](size_t ind) {
+    T &vector<T>::operator [](size_t ind) {
         return _mem[ind];
     }
 
@@ -60,11 +77,36 @@ namespace lua {
     }
 
     template<typename T>
+    vector<T>::vector(size_t c, size_t v) {
+        _capacity = c + 4;
+        _size = c;
+        _mem = (T*) malloc(sizeof(T) * _capacity);
+        for (size_t i = 0; i < c; i++) {
+            _mem[i] = v;
+        }
+    }
+
+    template<typename T>
+    vector<T>::vector(size_t c) {
+        _capacity = c + 4;
+        _size = c;
+        _mem = (T*) malloc(sizeof(T) * _capacity);
+    }
+
+    template<typename T>
+    vector<T>::vector(const vector<T> &vec) {
+        _size = vec.size();
+        _capacity = _size + 4;
+        _mem = (T*) malloc(sizeof(T) * _capacity);
+        for (size_t i = 0; i < _size; i++) {
+            _mem[i] = vec[i];
+        }
+    }
+
+    template<typename T>
     void vector<T>::pop_back() {
         _size --;
-        // println(_size);
         _mem[_size].~T();
-        // println(_size);
     }
 
     template<typename T>

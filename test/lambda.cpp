@@ -1,6 +1,6 @@
 #include <lua/io>
 
-using namespace lua;
+using namespace std;
 
 template <typename T>
 T fib(T n) {

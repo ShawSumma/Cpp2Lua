@@ -8,23 +8,20 @@ blocks = {{stackend+1, 2^32-2^16-1}}
 unpack = unpack or table.unpack
 
 if not bit then
-  bit = {
-    lshift = bit32.lshift,
-    rshift = bit32.rshift
-  }
+  bit = bit32
 end
 
-function extern.allocs(stack)
+function extern._allocs(stack)
   local count = 0
-  for _ in pairs(allocs) do
+  for _ in ipairs(allocs) do
     count = count + 1
   end
   stack[#stack+1] = count
 end
 
-function extern.blocks(stack)
+function extern._blocks(stack)
   local count = 0
-  for _ in pairs(blocks) do
+  for _ in ipairs(blocks) do
     count = count + 1
   end
   stack[#stack+1] = count
@@ -53,12 +50,13 @@ end
 function extern.malloc(stack)
   local size = stack[#stack]
   stack[#stack] = nil
-  for k, v in pairs(blocks) do
+  local count = 0
+  for k, v in ipairs(blocks) do
     local pl = v[1]
-    allocs[pl] = size
-    if v[2] > size then
-      v[1] = v[1] + size
-      v[2] = v[2] - size
+    if v[2] >= size then
+      allocs[pl] = size
+      blocks[k][1] = v[1] + size
+      blocks[k][2] = v[2] - size
       stack[#stack+1] = pl
       return
     end
@@ -72,21 +70,16 @@ function extern.free(stack)
   stack[#stack] = nil
   local size = allocs[ptr]
   local eptr = size + ptr
-  for k, v in pairs(blocks) do
-    if v[1] + v[2] == ptr then
-      allocs[ptr] = nil
-      return
-    end
+  for k, v in ipairs(blocks) do
     if v[1] == eptr then
       v[1] = v[1] - size
       v[2] = v[2] + size
-      blocks[k] = nil
       allocs[ptr] = nil
       return
     end
   end
   local count = 0
-  for _ in pairs(allocs) do
+  for _ in ipairs(allocs) do
     count = count + 1
   end
   allocs[ptr] = nil
@@ -95,16 +88,7 @@ end
 
 function extern.putchar(stack)
   io.write(string.char(stack[#stack]))
-  -- print('out: ' .. tostring(stack[#stack]))
   stack[#stack] = nil
-end
-
-function _store(storage, offs)
-  storage[offs] = val
-end
-
-function _load(storage, offs)
-  return storage[offs]
 end
 
 function _num(v)

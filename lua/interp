@@ -1,11 +1,21 @@
 #pragma once
 #include <lua/types>
 
-namespace lua {
-    namespace interp {
+namespace std {
+    namespace lua {
         extern "C" {
-            size_t allocs();
-            size_t blocks();
+            size_t _allocs();
+            size_t _blocks();
+        }
+        size_t allocs();
+        size_t blocks();
+
+        size_t allocs() {
+            return _allocs();
+        }
+
+        size_t blocks() {
+            return _blocks();
         }
     }
 }

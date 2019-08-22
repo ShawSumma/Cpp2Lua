@@ -1,73 +1,122 @@
+#pragma once
 #include <lua/types>
 
-namespace lua {
+extern "C" {
+    void *malloc(size_t);
+    void free(void *);
+}
+
+namespace std {
+    template<typename, typename>
+    class unique_ptr;
+
+    template<typename T, typename ...Args, typename D>
+    unique_ptr<T, D> make_unique(Args&&...);
+
     template<typename T>
-    class auto_ptr {
-        T *_v;
-        size_t _refc = 0;
+    class default_delete {
     public:
-        auto_ptr(const T&);
-        auto_ptr(auto_ptr<T>&);
-        auto_ptr(T* = nullptr);
-        // auto_ptr();
-        ~auto_ptr();
-        T *get();
-        void ref();
-        size_t refc() const;
-        T& operator*();
+        default_delete() {}
+        template<typename U>
+        default_delete(const default_delete<U> &) {}
+        void operator()(T *t) const {
+            delete t;
+        }
     };
 
-    template<typename T>
-    auto_ptr<T>::auto_ptr(const T& v) {
-        _v = new T(v);
-        _refc = 1;
+    template<typename T, typename D=default_delete<T>>
+    class unique_ptr {
+        T *_v;
+        size_t *_refc = new size_t(0);
+        D del = D();
+    public:
+        typedef T value_type;
+        unique_ptr(unique_ptr&&);
+        template<typename UT, typename UD>
+        unique_ptr(unique_ptr<UT, UD>&&);
+        template<typename T2, typename D2>
+        unique_ptr(unique_ptr<T2, D2>&);
+        unique_ptr(T*);
+        unique_ptr();
+        // template<typename T2, typename D2>
+        // unique_ptr<T, D> operator=(unique_ptr<T2, D2>);
+        ~unique_ptr();
+        void reset();
+        T *get();
+        size_t refc() const;
+        T &operator*() const;
+        T *operator->() const;
+    };
+
+    // template<typename T, typename D>
+    // template<typename T2, typename D2>
+    // unique_ptr<T, D> unique_ptr<T, D>::operator=(unique_ptr<T2, D2> other) {
+    //     // _v = new T(*other);
+    //     _v = new T();
+    //     *_v = (T2) *other;
+    //     del = D2();
+    //     return *this;
+    // }
+
+    template<typename T, typename ...Args, typename D=default_delete<T>>
+    unique_ptr<T, D> make_unique(Args&&... args) {
+        return std::unique_ptr<T, D>(new T(args...));
     }
 
-    template<typename T>
-    auto_ptr<T>::auto_ptr(T* v) {
+    template<typename T, typename D>
+    unique_ptr<T, D>::unique_ptr(T* v) {
         _v = v;
-        if (v) {
-            _refc = 1;
+        if (_v) {
+            (*_refc) ++;
         }
     }
 
-    template<typename T>
-    auto_ptr<T>::auto_ptr(auto_ptr<T>& v) {
-        _v = v.get();
-        _refc = v.refc();
-        ref();
+    template<typename T, typename D>
+    unique_ptr<T, D>::unique_ptr() {
+        (*_refc) ++;
     }
 
-    template<typename T>
-    T* auto_ptr<T>::get() {
+    template<typename T, typename D>
+    unique_ptr<T, D>::unique_ptr(unique_ptr&& v) {
+        _v = v.get();
+        _refc = v._refc;
+        if (_v) {
+            (*_refc) ++;
+        }
+    }
+
+    template<typename T, typename D>
+    T* unique_ptr<T, D>::get() {
         return _v;
     }
 
-    // template<typename T>
-    // auto_ptr<T>::auto_ptr() {
-    //     _refc ++;
-    // }
+    template<typename T, typename D>
+    void unique_ptr<T, D>::reset() {
+        del(_v);
+        *_refc = 0;
+    }
 
-    template<typename T>
-    auto_ptr<T>::~auto_ptr() {
+    template<typename T, typename D>
+    unique_ptr<T, D>::~unique_ptr() {
         _refc --;
         if (_refc == 0) {
-            delete _v;
+            reset();
+            free(_refc);
         }
     }
 
-    template<typename T>
-    size_t auto_ptr<T>::refc() const {
-        return _refc;
+    template<typename T, typename D>
+    size_t unique_ptr<T, D>::refc() const {
+        return *_refc;
     }
 
-    template<typename T>
-    void auto_ptr<T>::ref() {
-        _refc ++;
-    }
-
-    template<typename T>
-    T& auto_ptr<T>::operator*() {
+    template<typename T, typename D>
+    T &unique_ptr<T, D>::operator*() const {
         return *_v;
+    }
+
+    template<typename T, typename D>
+    T *unique_ptr<T, D>::operator->() const {
+        return _v;
     }
 }

@@ -11,7 +11,7 @@ extern "C" {
 }
 #endif
 
-namespace lua {
+namespace std {
     void print(const char *);
     void print(int);
     template<typename T>

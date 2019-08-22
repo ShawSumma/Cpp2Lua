@@ -1,0 +1,48 @@
+#pragma once
+#include <lua/memory>
+#include <lua/types>
+
+namespace std {
+    template<typename, typename...>
+    class function;
+
+    template<typename R, typename ...Args>
+    class function<R(Args...)> {
+        class _callable {
+        public:
+            virtual ~_callable() = default;
+            virtual R invoke(Args...) = 0;
+        };
+        template<typename T>
+        class _call_t : public _callable {
+            T _t;
+        public:
+            _call_t(const T& t) : _t(t){}
+            ~_call_t() override = default;
+            R invoke(Args... args) override {
+                return _t(args...);
+            }
+        };
+        std::unique_ptr<_callable> _func;
+    public:
+        function() {
+            _func = nullptr;
+        }
+        function(std::nullptr_t) {
+            _func = nullptr;
+        }
+        template<typename T>
+        function (T other) {
+            *this = other;
+            // _func = std::make_unique<T>(other);
+        }
+        template<typename T>
+        function<R, Args...> &operator=(std::function<R(Args...)> t) {
+            _func = std::make_unique<_call_t<T>>(t);
+            return *this;
+        }
+        R operator()(Args... args) const {
+            return _func->invoke(args...);
+        }
+    };
+}
