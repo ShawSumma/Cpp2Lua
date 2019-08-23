@@ -1,6 +1,9 @@
 #pragma once
-#include <lua/types>
+#include <lua/cstddef>
 
+#ifndef LUA_CPP_COMPILER
+#error "interp is a Cpp2Lua only header"
+#endif
 namespace std {
     namespace lua {
         extern "C" {

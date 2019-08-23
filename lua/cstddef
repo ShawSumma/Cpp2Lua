@@ -1,4 +1,6 @@
 #pragma once
+
+#ifdef LUA_CPP_COMPILER 
 using size_t = unsigned int;
 using int8_t = char;
 using uint8_t = unsigned char;
@@ -9,3 +11,6 @@ using uint32_t = unsigned int;
 namespace std {
     using nullptr_t = decltype(nullptr);
 }
+#else
+#include <cstddef>
+#endif

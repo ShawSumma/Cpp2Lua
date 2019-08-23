@@ -1,5 +1,5 @@
 #pragma once
-#include <lua/types>
+#include <lua/cstddef>
 
 #ifdef LUA_CPP_COMPILER
 extern "C" {
@@ -25,10 +25,9 @@ namespace std {
     }
 
     void print(const char *s) {
-        int x = 0;
-        while (s[x]) {
-            putchar(s[x]);
-            x ++;
+        while (*s) {
+            putchar(*s);
+            s ++;
         }
     }
 

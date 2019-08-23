@@ -1,6 +1,5 @@
 #pragma once
-#include <lua/types>
-#include <lua/interp>
+#include <lua/cstddef>
 #include <lua/numeric>
 #include <lua/memory>
 

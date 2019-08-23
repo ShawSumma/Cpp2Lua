@@ -1,4 +1,6 @@
 #pragma once
+
+#ifdef LUA_CPP_COMPILER
 namespace std {
     template<typename T, typename I>
     void itoa(T *, T *, I);
@@ -33,3 +35,6 @@ namespace std {
         return val;
     }
 }
+#else
+#include <numeric>
+#endif

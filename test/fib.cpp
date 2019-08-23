@@ -12,5 +12,5 @@ namespace bench {
 }
 
 int main(void) {
-    std::println(bench::fib(35));
+    return bench::fib(35);
 }

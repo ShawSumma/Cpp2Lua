@@ -1,10 +1,14 @@
 #pragma once
-#include <lua/types>
+#include <lua/cstddef>
 
+#ifdef LUA_CPP_COMPILER
 extern "C" {
     void *malloc(size_t);
     void free(void *);
 }
+#else
+#include <stdlib.h>
+#endif
 
 namespace std {
     template<typename, typename>
@@ -26,7 +30,7 @@ namespace std {
 
     template<typename T, typename D=default_delete<T>>
     class unique_ptr {
-        T *_v;
+        T *_v = nullptr;
         size_t *_refc = new size_t(0);
         D del = D();
     public:
@@ -41,22 +45,12 @@ namespace std {
         // template<typename T2, typename D2>
         // unique_ptr<T, D> operator=(unique_ptr<T2, D2>);
         ~unique_ptr();
-        void reset();
+        void reset(T *p);
         T *get();
         size_t refc() const;
         T &operator*() const;
         T *operator->() const;
     };
-
-    // template<typename T, typename D>
-    // template<typename T2, typename D2>
-    // unique_ptr<T, D> unique_ptr<T, D>::operator=(unique_ptr<T2, D2> other) {
-    //     // _v = new T(*other);
-    //     _v = new T();
-    //     *_v = (T2) *other;
-    //     del = D2();
-    //     return *this;
-    // }
 
     template<typename T, typename ...Args, typename D=default_delete<T>>
     unique_ptr<T, D> make_unique(Args&&... args) {
@@ -91,16 +85,17 @@ namespace std {
     }
 
     template<typename T, typename D>
-    void unique_ptr<T, D>::reset() {
+    void unique_ptr<T, D>::reset(T *v) {
         del(_v);
-        *_refc = 0;
+        *_refc = 1;
+        _v = v;
     }
 
     template<typename T, typename D>
     unique_ptr<T, D>::~unique_ptr() {
         _refc --;
         if (_refc == 0) {
-            reset();
+            reset(nullptr);
             free(_refc);
         }
     }

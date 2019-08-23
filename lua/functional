@@ -1,48 +1,73 @@
 #pragma once
 #include <lua/memory>
-#include <lua/types>
+#include <lua/cstddef>
 
+#ifdef LUA_CPP_COMPILER 
 namespace std {
-    template<typename, typename...>
+    template <typename, typename...>
     class function;
 
-    template<typename R, typename ...Args>
-    class function<R(Args...)> {
-        class _callable {
-        public:
-            virtual ~_callable() = default;
-            virtual R invoke(Args...) = 0;
-        };
-        template<typename T>
-        class _call_t : public _callable {
-            T _t;
-        public:
-            _call_t(const T& t) : _t(t){}
-            ~_call_t() override = default;
-            R invoke(Args... args) override {
-                return _t(args...);
-            }
-        };
-        std::unique_ptr<_callable> _func;
+    template<typename T, typename... Args>
+    class _callable_base {
     public:
-        function() {
-            _func = nullptr;
-        }
-        function(std::nullptr_t) {
-            _func = nullptr;
-        }
-        template<typename T>
-        function (T other) {
-            *this = other;
-            // _func = std::make_unique<T>(other);
-        }
-        template<typename T>
-        function<R, Args...> &operator=(std::function<R(Args...)> t) {
-            _func = std::make_unique<_call_t<T>>(t);
-            return *this;
-        }
-        R operator()(Args... args) const {
-            return _func->invoke(args...);
-        }
+        virtual T operator()(Args...) = 0;
+        virtual ~_callable_base();
     };
+
+    template <typename F, typename T, typename... Args>
+    class _callable_type : public _callable_base<T, Args...> {
+        F _functor;
+    public:
+        _callable_type(F);
+        virtual T operator()(Args...);
+    };
+
+    template <typename T, typename... Args>
+    class function<T(Args...)> {
+        std::unique_ptr<_callable_base<T, Args...>> _callable;
+    public:
+        template<typename F>
+        function(F);
+        function();
+        template<typename F>
+        function<T(Args...)> &operator=(F);
+        T operator()(Args...);
+    };
+
+    template<typename T, typename... Args>
+    _callable_base<T, Args...>::~_callable_base() {}
+
+    template <typename F, typename T, typename... Args>
+    _callable_type<F, T, Args...>::_callable_type(F functor) : _functor(functor) {}
+
+    template <typename F, typename T, typename... Args>
+    T _callable_type<F, T, Args...>::operator()(Args... args) {
+        return _functor(args...);
+    }
+
+    template<typename T, typename... Args>
+    template<typename F>
+    function<T(Args...)>::function(F callable) {
+        _callable.reset(new _callable_type<F, T, Args...>(callable));
+    }
+
+    template<typename T, typename... Args>
+    template<typename F>
+    function<T(Args...)> &function<T(Args...)>::operator=(F callable) {
+        _callable.reset(new _callable_type<F, T, Args...>(callable));
+        return *this;
+    }
+
+    template<typename T, typename... Args>
+    function<T(Args...)>::function() {
+        _callable.reset(nullptr);
+    }
+
+    template<typename T, typename... Args>
+    T function<T(Args...)>::operator()(Args... args) {
+        return (*_callable)(args...);
+    }
 }
+#else
+#include <functional>
+#endif
