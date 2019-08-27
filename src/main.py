@@ -15,8 +15,12 @@ class Compiler:
         self.depth = 0
         self.typec = 0
         self.types = []
-        self.dat = []
+        self.dat = {}
         self.fmap = []
+        self.exports = {}
+        self.symbols = {}
+        self.loadc = 0
+        self.storec = 0
         self.walks = {
             'get_global': Emit.get_global,
             'set_global': Emit.set_global,
@@ -104,6 +108,7 @@ class Compiler:
             'convert_u/i64': Emit.passop,
             'wrap/i64': Emit.passop,
             'wrap/i64': Emit.passop,
+            'reinterpret/i64': Emit.passop,
             'unreachable': Emit.passop,
         }
     def append(self, s):
@@ -113,34 +118,58 @@ class Compiler:
     def exit(self):
         self.depth -= 1
     def all(self):
+        self.append('g = {[0]=2^24}')
+        # for i in self.json:
+        #     if i['name'] == 'export':
+        #         for ent in i['entries']:
+        #             if ent['kind'] == 'function':
+        #                 si = '_' + ent['field_str']
+        #                 self.append(f'local {si} = nil')
         self.walk(self.json)
-        self.append(f'g0 = stackend')
-        mem = '{' + ', '.join(self.fmap) +'}'
-        self.append(f'f = {mem}')
-        fmtmem = '{' + ', '.join([str(i) for i in self.dat]) + '}'
+        # ret = []
+        # for i in self.symbols:
+        #     si = '_' + self.symbols[i]
+        #     self.append(f'local {si} = nil')
+        mem = '{' + ', '.join(['_'+i for i in self.fmap]) +'}'
+        self.append(f'local f = {mem}')
+        fmtmem = '{' + ', '.join([f"[{k}]={self.dat[k]}" for k in self.dat]) + '}'
         self.append(f'mem = {fmtmem}')
-        self.append('f%s({0, 0})' % (str(self.fnc-1), ))
+        self.append('local argc = #arg')
+        self.append('local argv = _libc.malloc(bigint(4 * (argc+1)))')
+        self.append('for k=0, argc do')
+        self.append('  local len = string.len(arg[k])')
+        self.append('  local m = _libc.malloc(bigint(len+1))')
+        self.append('  _memset(argv + k * 4 + 0, bit.rshift(m, 0) % 256)')
+        self.append('  _memset(argv + k * 4 + 1, bit.rshift(m, 8) % 256)')
+        self.append('  _memset(argv + k * 4 + 2, bit.rshift(m, 16) % 256)')
+        self.append('  _memset(argv + k * 4 + 3, bit.rshift(m, 24) % 256)')
+        self.append('  for k2=0, len do')
+        self.append('    _memset(m+k2, string.byte(string.sub(arg[k], k2+1, k2+1)) or 0)')
+        self.append('  end')
+        self.append('end')
+        self.append('for k,v in pairs(mem) do mem[k] = bigint(v) end')
+        self.append('local stack = {argc+1, argv}')
+        self.append('_main(stack)')
+        self.append('os.exit(_char(stack[#stack]))')
     def walk_import(self, *ent):
         for i in ent:
             if i['kind'] == 'function':
                 name = i['fieldStr']
-                fnc = self.fnc
-                self.append(f'f{fnc} = extern.{name}')
+                self.append(f'local _{name} = extern.{name}')
+                self.symbols[self.fnc] = name
                 self.fnc += 1
             elif i['kind'] == 'global':
                 count = self.globalc
-                self.append(f'g{count} = 0')
+                self.append(f'g[{count}] = bigint(0)')
                 self.globalc += 1
             else:
                 pass
     def walk_data(self, *ent):
         for jsv in ent:
+            offs = int(jsv['offset']['immediates'])
             if isinstance(jsv['data'], list):
-                # ind = int(jsv['offset']['immediates'])+1
-                for i in jsv['data']:
-                    self.dat.append(i)
-                    # self.append(f'mem[{ind}] = {i}') 
-                    # ind += 1
+                for pl, i in enumerate(jsv['data']):
+                    self.dat[offs+pl] = i
     def walk(self, obj):
         if isinstance(obj, list):
             for i in obj:
@@ -161,21 +190,35 @@ class Compiler:
                     self.types.append(len(i['params']))
             elif name == 'element':
                 ent = obj['entries']
-                lis = []
                 for e in ent:
                     for i in e['elements']:
-                        self.fmap.append(f'f{i}')
+                        name = self.getfname(i)
+                        self.fmap.append(name)
             elif name == 'function':
                 self.typemap = obj['entries']
+            elif name == 'export':
+                ents = obj['entries']
+                for ent in ents:
+                    if ent['kind'] == 'function':
+                        self.exports[ent['field_str']] = ent['index']
+                        self.symbols[int(ent['index'])] = ent['field_str']
             else:
                 pass
+    def getfname(self, name):
+        name = int(name)
+        if name in self.symbols:
+            return self.symbols[name]
+        else:
+            ret = f'f{name}'
+            return ret
     def walk_op(self, op):
         self.walks[op['name']](self, op)
     def walk_fn_body(self, locs, code):
         self.ends = ['']
         self.blockc = 0
         self.localc = 0
-        self.append(f'function f{self.fnc}(stack)')
+        name = self.getfname(self.fnc)
+        self.append(f'_{name} = _{name} or function (stack)')
         self.enter()
         # self.append('do')
         # self.enter()
@@ -184,16 +227,6 @@ class Compiler:
         for i in range(nargc)[::-1]:
             self.append(f'l[{i}] = stack[#stack]')
             self.append('stack[#stack] = nil')
-        # localc = 0
-        # for i in locs:
-        #     localc += i['count']
-        # if localc > 0:
-        #     s = []
-        #     for i in range(localc):
-        #         n = nargc + i
-        #         s.append('l' + str(n))
-        #     ss = ', '.join(s)
-        #     self.append(f'local {ss}')
         pl = 0
         for i in locs:
             for _ in range(i['count']):
@@ -214,12 +247,12 @@ class Compiler:
 class EmitDefault(Compiler):
     def set_global(self, js):
         imm = js['immediates']
-        self.append(f'g{imm} = stack[#stack]')
+        self.append(f'g[{imm}] = stack[#stack]')
         self.append(f'stack[#stack] = nil')
 
     def get_global(self, js):
         imm = js['immediates']
-        self.append(f'stack[#stack+1] = g{imm}')
+        self.append(f'stack[#stack+1] = g[{imm}]')
 
     def set_local(self, js):
         imm = js['immediates']
@@ -249,17 +282,17 @@ class EmitDefault(Compiler):
         imm = js['immediates']
         if isinstance(imm, list):
             [imm] = struct.unpack('f' if len(imm) == 4 else 'd', bytes(imm))
-        self.append(f'stack[#stack+1] = {imm}')
+        self.append(f'stack[#stack+1] = bigint({imm})')
 
     def drop(self, js):
         self.append('stack[#stack] = nil')
 
-    def opand(self, js):
-        self.append(f'stack[#stack-1] = bit.band(stack[#stack-1], stack[#stack])')
+    def xor(self, js):
+        self.append(f'stack[#stack-1] = bit.bxor(stack[#stack-1], stack[#stack] ~= bigint(0))')
         self.append(f'stack[#stack] = nil')
 
-    def xor(self, js):
-        self.append(f'stack[#stack-1] = bit.bxor(stack[#stack-1], stack[#stack])')
+    def opand(self, js):
+        self.append(f'stack[#stack-1] = bit.band(stack[#stack-1], stack[#stack])')
         self.append(f'stack[#stack] = nil')
 
     def opor(self, js):
@@ -267,31 +300,31 @@ class EmitDefault(Compiler):
         self.append(f'stack[#stack] = nil')
 
     def ne(self, js):
-        self.append(f'stack[#stack-1] = _num(stack[#stack-1] ~= stack[#stack])')
+        self.append(f'stack[#stack-1] = andor(stack[#stack-1] ~= stack[#stack])')
         self.append(f'stack[#stack] = nil')
 
     def eq(self, js):
-        self.append(f'stack[#stack-1] = _num(stack[#stack-1] == stack[#stack])')
+        self.append(f'stack[#stack-1] = andor(stack[#stack-1] == stack[#stack])')
         self.append(f'stack[#stack] = nil')
 
     def gt_s(self, js):
-        self.append(f'stack[#stack-1] = _num(stack[#stack-1] > stack[#stack])')
+        self.append(f'stack[#stack-1] = andor(stack[#stack-1] > stack[#stack])')
         self.append(f'stack[#stack] = nil')
 
     def lt_s(self, js):
-        self.append(f'stack[#stack-1] = _num(stack[#stack-1] < stack[#stack])')
+        self.append(f'stack[#stack-1] = andor(stack[#stack-1] < stack[#stack])')
         self.append(f'stack[#stack] = nil')
     
     def ge_s(self, js):
-        self.append(f'stack[#stack-1] = _num(stack[#stack-1] >= stack[#stack])')
+        self.append(f'stack[#stack-1] = andor(stack[#stack-1] >= stack[#stack])')
         self.append(f'stack[#stack] = nil')
 
     def le_s(self, js):
-        self.append(f'stack[#stack-1] = _num(stack[#stack-1] <= stack[#stack])')
+        self.append(f'stack[#stack-1] = andor(stack[#stack-1] <= stack[#stack])')
         self.append(f'stack[#stack] = nil')
         
     def eqz(self, js):
-        self.append(f'stack[#stack] = _num(stack[#stack] == 0)')
+        self.append(f'stack[#stack] = andor(stack[#stack] == bigint(0))')
 
     def br_if(self, js):
         imm = self.blockc - int(js['immediates'])
@@ -299,7 +332,7 @@ class EmitDefault(Compiler):
         self.enter()
         self.append('local case = stack[#stack]')
         self.append('stack[#stack] = nil')
-        self.append(f'if _bool(case) then goto b{imm} end')
+        self.append(f'if case ~= bigint(0) then goto b{imm} end')
         self.exit()
         self.append('end')
 
@@ -324,13 +357,13 @@ class EmitDefault(Compiler):
         self.append(f'stack[#stack] = nil')
 
     def opabs(self, js):
-        self.append(f'if stack[#stack] < 0 then stack[#stack] = -stack[#stack] end')
+        self.append(f'if stack[#stack] < bigint(0) then stack[#stack] = -stack[#stack] end')
 
     def div_s(self, js):
         self.append('do')
         self.enter()
         self.append('local val = stack[#stack-1] / stack[#stack]')    
-        self.append('if val > 0 then')
+        self.append('if val > bigint(0) then')
         self.enter()
         self.append('stack[#stack-1] = math.floor(val)')
         self.exit()
@@ -352,6 +385,7 @@ class EmitDefault(Compiler):
         self.append(f'stack[#stack] = nil')
 
     def store(self, js):
+        self.storec += 1
         imm = js['immediates']
         offs = imm['offset']
         if js['name'][-2] == '_':
@@ -364,16 +398,13 @@ class EmitDefault(Compiler):
         self.append('stack[#stack] = nil')
         for i in range(int(count)):
             of = offs+i
-            if count > 4:
-                i1 = i + 1
-                self.append(f'mem[addr + {of} + 1] = val[{i1}]')
-            else:
-                i8 = i * 8
-                self.append(f'mem[addr + {of} + 1] = bit.rshift(val, {i8}) % 256')
+            i8 = i * 8
+            self.append(f'_memset(addr + {of}, bit.rshift(val, {i8}) % 256)')
         self.exit()
         self.append('end')
 
     def load(self, js):
+        self.loadc += 1
         imm = js['immediates']
         offs = imm['offset']
         if js['name'][-2] == '_':
@@ -381,31 +412,25 @@ class EmitDefault(Compiler):
         count = int(js['return_type'][1:])/8 if js['name'] == 'load' else int(int(js['name'][4:]) / 8)
         self.append('do')
         self.enter()
-        if count > 4:
-            self.append('local val, addr = {}, stack[#stack]')
-        else:
-            self.append('local val, addr = 0, stack[#stack]')
+        self.append('local val, addr = bigint(0), stack[#stack]')
         self.append('stack[#stack] = nil')
         for i in range(int(count)):
             of = offs+i
             i8 = i * 8
-            if count > 4:
-                i1 = i + 1
-                self.append(f'val[{i1}] = mem[addr + {of} + 1]')
-            else:
-                self.append(f'val = val + bit.lshift(mem[addr + {of} + 1], {i8})')
+            self.append(f'val = val + bit.lshift(_memget(addr + {of}), {i8})')
         self.append('stack[#stack+1] = val')
         self.exit()
         self.append('end')
 
     def call(self, js):
         imm = js['immediates']
-        self.append(f'f{imm}(stack)')
+        name = self.getfname(imm)
+        self.append(f'_{name}(stack)')
 
     def calli(self, js):
         self.append('do')
         self.enter()
-        self.append('local fn = f[stack[#stack]]')
+        self.append('local fn = f[stack[#stack]:conv()]')
         self.append('stack[#stack] = nil')
         self.append('fn(stack)')
         self.exit()
@@ -420,7 +445,7 @@ class EmitDefault(Compiler):
             self.append(val)
 
     def select(self, js):
-        self.append('if stack[#stack-2] == 0 then stack[#stack-2] = stack[#stack] else stack[#stack-2] = stack[#stack-1] end')
+        self.append('if stack[#stack-2] == bigint(0) then stack[#stack-2] = stack[#stack] else stack[#stack-2] = stack[#stack-1] end')
         self.append('stack[#stack] = nil')
         self.append('stack[#stack] = nil')
 
@@ -435,10 +460,10 @@ class EmitDefault(Compiler):
         self.append(f'stack[#stack] = nil')
         for pl, i in enumerate(targ):
             gt = self.blockc - i
-            self.append(f'if val == {pl} then')
+            self.append(f'if val == bigint({pl}) then')
             self.enter()
             self.append(f'goto b{gt}')
-            self.exit()
+            self.exit() 
             self.append('end')
         self.exit()
         self.append('end')
@@ -460,7 +485,7 @@ Emit = EmitDefault
 cc = Compiler('out.json')
 cc.all()
 with open('out.lua', 'w') as f:
-    with open('src/def.lua') as d:
+    with open('src/pre.lua') as d:
         c = d.read()
     f.write(c)
     f.write('\n')

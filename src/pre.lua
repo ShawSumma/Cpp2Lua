@@ -1,0 +1,11 @@
+local bigint = require("src.bigint")
+local bitlib = require("src.bit")
+local bit = bitlib.bit32
+local libclib = require("src.libc")
+local extern = libclib.ret
+local _libc = libclib.libc
+local _memget = extern._memget
+local _memset = extern._memset
+local _char = extern._char
+local andor = libclib.andor
+local unpack = unpack or table.unpack
