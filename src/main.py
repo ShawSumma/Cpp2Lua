@@ -1,5 +1,6 @@
 import json
 import struct
+from collections import deque
 
 interp = True
 
@@ -119,19 +120,9 @@ class Compiler:
         self.depth -= 1
     def all(self):
         self.append('g = {[0]=2^24}')
-        # for i in self.json:
-        #     if i['name'] == 'export':
-        #         for ent in i['entries']:
-        #             if ent['kind'] == 'function':
-        #                 si = '_' + ent['field_str']
-        #                 self.append(f'local {si} = nil')
         self.walk(self.json)
-        # ret = []
-        # for i in self.symbols:
-        #     si = '_' + self.symbols[i]
-        #     self.append(f'local {si} = nil')
         mem = '{' + ', '.join(['_'+i for i in self.fmap]) +'}'
-        self.append(f'local f = {mem}')
+        self.append(f'f = {mem}')
         fmtmem = '{' + ', '.join([f"[{k}]={self.dat[k]}" for k in self.dat]) + '}'
         self.append(f'mem = {fmtmem}')
         self.append('local argc = #arg')
@@ -212,16 +203,17 @@ class Compiler:
             ret = f'f{name}'
             return ret
     def walk_op(self, op):
+        cop = op.copy()
+        del cop['name']
         self.walks[op['name']](self, op)
     def walk_fn_body(self, locs, code):
-        self.ends = ['']
-        self.blockc = 0
+        self.ends = [None]
+        # self.blockc = 1
+        self.blocks = deque([0])
         self.localc = 0
         name = self.getfname(self.fnc)
         self.append(f'_{name} = _{name} or function (stack)')
         self.enter()
-        # self.append('do')
-        # self.enter()
         self.append('local l = {}')
         nargc = self.types[self.typemap[self.typec]]
         for i in range(nargc)[::-1]:
@@ -242,6 +234,11 @@ class Compiler:
             self.walk_fn_body(i['locals'], i['code'])
     def get_code(self):
         return '\n'.join(self.code)
+    def newblock(self):
+        self.blocks[-1] += 1
+        return self.blocks[-1] - 1
+    def getblock(self, n):
+        return self.blocks[n]
 
 
 class EmitDefault(Compiler):
@@ -268,15 +265,56 @@ class EmitDefault(Compiler):
         self.append(f'stack[#stack+1] = l[{imm}]')
 
     def block(self, js):
-        self.blockc += 1
-        bc = self.blockc
-        self.ends.append(f'::b{bc}::')
+        nb = self.newblock()
+        self.ends.append(('block', nb))
+        self.blocks.appendleft(nb)
 
     def loop(self, js):
-        self.blockc += 1
-        bc = self.blockc
-        self.append(f'::b{bc}::')
-        self.ends.append(None)
+        nb = self.newblock()
+        self.append(f'::b{nb}::')
+        self.ends.append(('loop', nb))
+        self.blocks.appendleft(nb)
+
+    def end(self, js):
+        ep = self.ends.pop()
+        if isinstance(ep, tuple):
+            ep, *val = ep
+            if ep == 'block':
+                self.append(f'::b{val[0]}::')
+                pass
+            elif ep == 'loop':
+                pass
+            self.blocks.popleft()
+
+    def br(self, js):
+        imm = self.getblock(int(js['immediates']))
+        self.append(f'goto b{imm}')
+
+    def br_if(self, js):
+        imm = self.getblock(int(js['immediates']))
+        self.append('do')
+        self.enter()
+        self.append('local case = stack[#stack]')
+        self.append('stack[#stack] = nil')
+        self.append(f'if case ~= bigint(0) then goto b{imm} end')
+        self.exit()
+        self.append('end')
+
+    def br_table(self, js):
+        targ = js['immediates']['targets']
+        self.append('do')
+        self.enter()
+        self.append(f'local val = stack[#stack]')
+        self.append(f'stack[#stack] = nil')
+        for pl, i in enumerate(targ):
+            gt = self.getblock(i)
+            self.append(f'if val == bigint({pl}) then')
+            self.enter()
+            self.append(f'goto b{gt}')
+            self.exit() 
+            self.append('end')
+        self.exit()
+        self.append('end')
 
     def const(self, js):
         imm = js['immediates']
@@ -288,7 +326,7 @@ class EmitDefault(Compiler):
         self.append('stack[#stack] = nil')
 
     def xor(self, js):
-        self.append(f'stack[#stack-1] = bit.bxor(stack[#stack-1], stack[#stack] ~= bigint(0))')
+        self.append(f'stack[#stack-1] = bit.bxor(stack[#stack-1], stack[#stack])')
         self.append(f'stack[#stack] = nil')
 
     def opand(self, js):
@@ -325,20 +363,6 @@ class EmitDefault(Compiler):
         
     def eqz(self, js):
         self.append(f'stack[#stack] = andor(stack[#stack] == bigint(0))')
-
-    def br_if(self, js):
-        imm = self.blockc - int(js['immediates'])
-        self.append('do')
-        self.enter()
-        self.append('local case = stack[#stack]')
-        self.append('stack[#stack] = nil')
-        self.append(f'if case ~= bigint(0) then goto b{imm} end')
-        self.exit()
-        self.append('end')
-
-    def br(self, js):
-        imm = self.blockc - int(js['immediates'])
-        self.append(f'goto b{imm}')
 
     def shr(self, js):
         self.append(f'stack[#stack-1] = bit.rshift(stack[#stack-1], stack[#stack])')
@@ -425,6 +449,7 @@ class EmitDefault(Compiler):
     def call(self, js):
         imm = js['immediates']
         name = self.getfname(imm)
+
         self.append(f'_{name}(stack)')
 
     def calli(self, js):
@@ -439,11 +464,6 @@ class EmitDefault(Compiler):
     def ret(self, js):
         self.append('do return end')
 
-    def end(self, js):
-        val = self.ends.pop()
-        if val is not None and len(val.strip()) != 0:
-            self.append(val)
-
     def select(self, js):
         self.append('if stack[#stack-2] == bigint(0) then stack[#stack-2] = stack[#stack] else stack[#stack-2] = stack[#stack-1] end')
         self.append('stack[#stack] = nil')
@@ -451,22 +471,6 @@ class EmitDefault(Compiler):
 
     def passop(self, js):
         pass
-
-    def br_table(self, js):
-        targ = js['immediates']['targets']
-        self.append('do')
-        self.enter()
-        self.append(f'local val = stack[#stack]')
-        self.append(f'stack[#stack] = nil')
-        for pl, i in enumerate(targ):
-            gt = self.blockc - i
-            self.append(f'if val == bigint({pl}) then')
-            self.enter()
-            self.append(f'goto b{gt}')
-            self.exit() 
-            self.append('end')
-        self.exit()
-        self.append('end')
 
     def opciel(self, js):
         self.append('stack[#stack] = math.ceil(stack[#stack])')

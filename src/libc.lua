@@ -7,23 +7,29 @@ local news = {}
 local blocks = {}
 local enbuf = bigint(0)
 
+local fdescs = {
+    [0]=io.stdin,
+    [1]=io.stdout,
+    [2]=io.stderr,
+}
+
 local unpack = unpack or table.unpack
 
 function ret._memget(n)
-    local got = mem[ret._addr(n)]
-    assert(got)
+    local got = mem[ret._addr(n)] or 0
+    -- assert(got)
     return got
 end
-local _memget = _memget
+local _memget = ret._memget
 
 function ret._memset(n, v)
     mem[ret._addr(n)] = bigint(v)
 end
-local _memset = _memset
+local _memset = ret._memset
 
 local function readstr(addr)
     local tab = {}
-    while _memget(addr) ~= 0 do
+    while _memget(addr) ~= bigint(0) do
         tab[#tab+1] = string.char(_memget(addr))
         addr = addr+1
     end
@@ -48,7 +54,6 @@ function ret._addr(n)
         return n
     else
         local ret = n:conv()
-        -- print('addr =', ret)
         return ret
     end
 end
@@ -140,11 +145,12 @@ function libc.free(ptr)
 end
 
 function libc.puts(ptr)
-    while _memget(ptr) ~= 0 do
+    while _memget(ptr) ~= bigint(0) do
         io.write(string.char(_memget(ptr)))
         ptr = ptr+1
     end
     io.write('\n')
+    return bigint(0)
 end
 
 function libc.realloc(ptr, size)
@@ -252,10 +258,10 @@ end
 
 function ret.puts(stack)
     local ptr = stack[#stack]
-    stack[#stack] = nil
-    while _memget(ptr) ~= 0 do
+    stack[#stack] = bigint(0);
+    while _memget(ptr) ~= bigint(0) do
         io.write(string.char(_char(_memget(ptr))))
-        ptr = ptr+1
+    ptr = ptr+1
     end
     io.write('\n')
 end
@@ -263,20 +269,53 @@ end
 function ret.putchar(stack)
     local chr = _char(stack[#stack])
     io.write(string.char(chr))
-    -- io.write(tostring(chr).."\t= "..string.char(chr)..'\n')
-    io.flush()
     stack[#stack] = nil
 end
 
 function ret.__printn(stack)
-    print('debug:' .. tostring(stack[#stack]))
-    stack[#stack] = nil
+    print('debug: ' .. tostring(stack[#stack]))
+    -- stack[#stack] = nil
 end
 
 function ret.getchar(stack)
     local ret = string.byte(io.read(1))
     stack[#stack+1] = bigint(ret)
 end
+
+function ret.putc(stack)
+    local fdec = _addr(stack[#stack])
+    local file
+    if fdec == 0 then
+        file = io.stdout
+    else
+        file = fdescs[fdec]
+    end
+    stack[#stack] = nil
+    local bigchr = _char(stack[#stack])   
+    local chr = string.char(bigchr)
+    file:write(chr)
+    stack[#stack] = bigchr
+end
+
+function ret.getc(stack)
+    local fdec = _addr(stack[#stack])
+    local file
+    if fdec == 0 then
+        file = io.stdin
+    else
+        file = fdescs[fdec]
+    end
+    local chr = file:read(1)
+    if chr then
+        local byte = string.byte(chr)
+        stack[#stack] = bigint(byte)
+    else
+        stack[#stack] = bigint(-1)
+    end
+end
+
+ret._IO_putc = ret.putc
+ret._IO_getc = ret.getc
 
 local function andor(x)
     if x then

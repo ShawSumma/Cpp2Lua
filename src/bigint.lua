@@ -461,7 +461,7 @@ local function rem(bi, m)
 	elseif type(bi) == "number" then
 		bi = bigint(bi)
 	end
-	return bi - ((bi / m) * bi)
+	return bi - ((bi / m) * m)
 end
 
 local function mod(a, m)
@@ -514,7 +514,8 @@ local function bigint(n)
 		return cache[n]
 	end
 	if type(n) == 'table' then
-		return clone(n) end
+		return clone(n)
+	end
     local bi
 	if type(n) == "string" then
 		local digits = { n:byte(1, -1) }

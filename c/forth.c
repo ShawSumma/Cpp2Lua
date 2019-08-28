@@ -20,7 +20,6 @@
 * used are getchar, putchar and the EOF value. */
 #include <stdio.h>
 #include <stdint.h>
-void __printn(void *);
 
 /* Base cell data types. Use short/long on most systems for 16 bit cells. */
 /* Experiment here if necessary. */
@@ -100,7 +99,8 @@ builtin builtins[MAX_BUILTIN_ID] = { 0 };
 * Forth for convenience. Focus is on simplicity, not speed. Partly copied from
 * Jonesforth (see top of file). */
 char *initscript_pos;
-const char *initScript =
+
+const char *initScript = 
     ": DECIMAL 10 BASE ! ;\n"
     ": HEX 16 BASE ! ;\n"
     ": OCTAL 8 BASE ! ;\n"
@@ -196,7 +196,9 @@ void putkey(char c)
 * read from a serial line. */
 int llkey()
 {
-    if (*initscript_pos) return *(initscript_pos++);
+    if (*initscript_pos) {
+        return *(initscript_pos++);
+    }
     return getchar();
 }
 
@@ -211,6 +213,7 @@ int keyWaiting()
 int getkey()
 {
     int c;
+
 
     if (keyWaiting())
         return lineBuffer[positionInLineBuffer++];
@@ -343,7 +346,6 @@ byte readWord()
 
     while ((c = getkey()) != EOF)
     {
-        __printn(c);
         if (c == ' ') continue;
         if (c == '\n') continue;
         if (c != '\\') break;
@@ -596,7 +598,6 @@ BUILTIN(38, "QUIT", quit, 0)
     {
         lastIp = next = quit_address;
         errorFlag = 0;
-
         word();
         find();
 
@@ -992,6 +993,10 @@ byte slen(const char *str)
 /* Add a builtin to the dictionary */
 void addBuiltin(cell code, const char* name, const byte flags, builtin f)
 {
+    tell("add: ");
+    tell(name);
+    tell("\n");
+
     if (errorFlag) return;
 
     if (code >= MAX_BUILTIN_ID)
